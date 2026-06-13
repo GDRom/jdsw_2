@@ -273,6 +273,12 @@ def align_sequence(
     candidates = []
     for i, lemma in enumerate(lemmas_norm):
         positions = _find_all(lemma, text_norm, max_candidates)
+        # an ambiguous single character carries no positional evidence; if the
+        # LIS picked one of its occurrences it would become a hard anchor wall
+        # that strands neighbors. Leave it to gap-filling, bounded by the
+        # multi-character anchor skeleton. A unique single char still anchors.
+        if len(lemma) == 1 and len(positions) > 1:
+            continue
         if 0 < len(positions) <= max_candidates:
             weight = len(lemma) ** 2
             for pos in positions:

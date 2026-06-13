@@ -47,6 +47,17 @@ class TestAlignSequence(unittest.TestCase):
         matches = align_sequence(["甲乙丙", "丁", "庚辛壬"], text)
         self.assertEqual((matches[1].start, matches[1].end), (3, 4))
 
+    def test_ambiguous_single_char_is_not_an_anchor(self):
+        """a single char occurring more than once carries no positional
+        evidence: it must be gap-filled, not made a monotonic anchor wall"""
+        matches = align_sequence(["大學", "之", "至善"], "大學之道明德之至善")
+        self.assertEqual(matches[0].confidence, ANCHOR)
+        self.assertEqual(matches[2].confidence, ANCHOR)
+        # 之 occurs twice -> placed by gap-fill, not anchored
+        self.assertNotEqual(matches[1].confidence, ANCHOR)
+        positions = [m.start for m in matches if m.found]
+        self.assertEqual(positions, sorted(positions))
+
     def test_unmatched_lemma_is_reported(self):
         """a lemma absent from the text is flagged, not silently misplaced"""
         matches = align_sequence(["甲乙丙", "魚魚", "庚辛壬"], "甲乙丙丁戊己庚辛壬癸")
