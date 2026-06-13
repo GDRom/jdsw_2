@@ -4,6 +4,7 @@ from scripts.lib.alignment import (
     ALTERNATE,
     ANCHOR,
     GAP,
+    NONMONOTONIC,
     PARTIAL,
     UNMATCHED,
     Alignment,
@@ -54,6 +55,18 @@ class TestAlignSequence(unittest.TestCase):
         # neighbors are unaffected
         self.assertEqual(matches[0].confidence, ANCHOR)
         self.assertEqual(matches[2].confidence, ANCHOR)
+
+    def test_nonmonotonic_lemma_is_distinguished_from_unmatched(self):
+        """a lemma present in the witness but only at an out-of-order position
+        is flagged NONMONOTONIC with the evidence offset, not UNMATCHED"""
+        matches = align_sequence(
+            ["甲乙丙", "戊", "丁", "庚辛壬"], "甲乙丙丁戊己庚辛壬癸"
+        )
+        # 戊 anchors at 4; the window left to 丁 is past it, but 丁 sits at 3
+        self.assertEqual(matches[2].confidence, NONMONOTONIC)
+        self.assertEqual(matches[2].evidence_start, 3)
+        self.assertIsNone(matches[2].start)
+        self.assertFalse(matches[2].found)
 
     def test_partial_match(self):
         """a lemma whose graph differs from the base text matches by prefix"""

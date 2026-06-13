@@ -32,7 +32,10 @@ ANCHOR = "anchor"  # exact match selected by weighted LIS
 GAP = "gap"  # exact match found between two anchors
 ALTERNATE = "alternate"  # matched via an alternative graph cited in the gloss
 PARTIAL = "partial"  # prefix/suffix match found between two anchors
-UNMATCHED = "unmatched"  # no plausible position found
+# present in the witness, but only at a position that breaks the monotonic
+# ordering (a likely transposition or edition-order discrepancy for a human)
+NONMONOTONIC = "nonmonotonic"
+UNMATCHED = "unmatched"  # genuinely absent from the witness
 
 # placeholder for a damaged/illegible character in SBCK transcriptions;
 # treated as a wildcard that matches any lemma character
@@ -56,6 +59,10 @@ class Match:
     # end of the portion of the span actually verified against the text; for
     # partial matches the rest of the span is extrapolated from lemma length
     verified_end: Optional[int] = None
+    # for a NONMONOTONIC lemma, a position in the source text where it WAS found
+    # but could not be placed monotonically (reported for the reviewer); the
+    # lemma is still unplaced, so found stays False
+    evidence_start: Optional[int] = None
 
     @property
     def found(self) -> bool:
@@ -201,6 +208,39 @@ def _fill_gap(
     return None
 
 
+def _occurs_anywhere(lemma: str, text: str, alternates: tuple = ()) -> Optional[int]:
+    """
+    First offset at which lemma occurs anywhere in the full text, ignoring
+    monotonic ordering. Mirrors _fill_gap's matching rules — exact/wildcard
+    match, then alternate-graph single-position substitution, then a prefix or
+    suffix of length >= the same min_length (2 if len(lemma) >= 3 else 1) — but
+    searches the whole text rather than a window. Used to tell a lemma that is
+    genuinely absent (UNMATCHED) from one that is present only at a position
+    that breaks the ordering (NONMONOTONIC). Returns None if none occur.
+    """
+    pos = _wildcard_find(lemma, text)
+    if pos != -1:
+        return pos
+
+    for alt in alternates:
+        for i in range(len(lemma)):
+            variant = lemma[:i] + alt + lemma[i + 1 :]
+            pos = _wildcard_find(variant, text)
+            if pos != -1:
+                return pos
+
+    min_length = 2 if len(lemma) >= 3 else 1
+    for length in range(len(lemma) - 1, min_length - 1, -1):
+        pos = _wildcard_find(lemma[:length], text)
+        if pos != -1:
+            return pos
+        pos = _wildcard_find(lemma[-length:], text)
+        if pos != -1:
+            return pos
+
+    return None
+
+
 def alternate_graphs(annotation: str) -> tuple:
     """Alternative graphs for the headword cited in an annotation (本又作X)."""
     graphs = []
@@ -265,7 +305,14 @@ def align_sequence(
             # next lemma may legitimately occupy
             cursor = match.verified_end if match.verified_end is not None else match.end
         else:
-            matches.append(Match(i, lemmas[i], None, None, UNMATCHED))
+            # not placeable in its window: is it absent, or merely out of order?
+            evidence = _occurs_anywhere(lemma, text_norm, alternates_norm[i])
+            if evidence is not None:
+                matches.append(
+                    Match(i, lemmas[i], None, None, NONMONOTONIC, evidence_start=evidence)
+                )
+            else:
+                matches.append(Match(i, lemmas[i], None, None, UNMATCHED))
 
     return matches
 
@@ -330,6 +377,7 @@ class Alignment:
                     "annotation": annotation,
                     "y_span": (y_start, y_end),
                     "x_span": (match.start, match.end) if match.found else None,
+                    "evidence_x": match.evidence_start,
                     "confidence": match.confidence,
                     "layer": layer_at(layers, match.start) if match.found else None,
                 }
